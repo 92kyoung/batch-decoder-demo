@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: batch-decoder-demo
+
+decoder:
+  l1-rpc: https://eth-sepolia.g.alchemy.com/v2/uKKRn-W7U18EAYoK66WDI9JhdLobWSll
+  l1-beacon: https://eth-sepoliabeacon.g.alchemy.com/v2/uKKRn-W7U18EAYoK66WDI9JhdLobWSll
+  inbox: 0x00Ef2E3b7754F2A65f1E897a27A3306d9b52f544
+  sender: 0x1cAAaa58002a7e8B4c6f427ac2c943767b4d6cd7
