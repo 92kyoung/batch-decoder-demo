@@ -1,7 +1,10 @@
-package com.hanati.web3.batch_decoder_demo
+package com.hanati.web3.batch_decoder_demo.adapter.out
 
-import org.springframework.beans.factory.annotation.Value
-import org.springframework.stereotype.Service
+import com.hanati.web3.batch_decoder_demo.application.port.BatchDecoderPort
+import com.hanati.web3.batch_decoder_demo.config.DecoderProperties
+import com.hanati.web3.batch_decoder_demo.domain.Channel
+import com.hanati.web3.batch_decoder_demo.domain.Frame
+import org.springframework.stereotype.Component
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import java.io.FileNotFoundException
@@ -17,13 +20,15 @@ import java.util.concurrent.TimeUnit
  * the rest of the app can call fetch+reassemble like a normal function, without depending on Go
  * or this repo being present on the machine the app runs on.
  */
-@Service
-class BatchDecoderService(
-    @Value("\${decoder.l1-rpc}") private val l1Rpc: String,
-    @Value("\${decoder.l1-beacon}") private val l1Beacon: String,
-    @Value("\${decoder.inbox}") private val inboxAddress: String,
-    @Value("\${decoder.sender}") private val senderAddress: String,
-) {
+@Component
+class ProcessBuilderBatchDecoderAdapter(
+    decoderProperties: DecoderProperties,
+) : BatchDecoderPort {
+    private val l1Rpc = decoderProperties.l1Rpc
+    private val l1Beacon = decoderProperties.l1Beacon
+    private val inboxAddress = decoderProperties.inbox
+    private val senderAddress = decoderProperties.sender
+
     private val objectMapper = ObjectMapper()
 
     // Extracted once per JVM lifetime and reused - these two files never change between calls.
@@ -59,11 +64,9 @@ class BatchDecoderService(
      * Fetches and reassembles L1 blocks [start, end), returning one decoded channel per element
      * (same shape as batch_decoder's channel_cache/<channelID>.json files).
      */
-    fun fetchAndReassemble(start: Long, end: Long): List<JsonNode> {
+    override fun fetchAndReassemble(start: Long, end: Long): List<Channel> {
         val workDir = Files.createTempDirectory("batch_decoder_run_")
         val txCacheDir = workDir.resolve("tx_cache").also { Files.createDirectories(it) }
-        // channelCacheDir (class field) is persistent - reassemble adds/overwrites into it rather
-        // than a dir that gets wiped, so only files this run touches are considered "new".
         val runStart = Instant.now().minusSeconds(1)
 
         try {
@@ -93,12 +96,25 @@ class BatchDecoderService(
 
             return Files.list(channelCacheDir).use { files ->
                 files.filter { it.toString().endsWith(".json") && Files.getLastModifiedTime(it).toInstant() >= runStart }
-                    .map { objectMapper.readTree(it.toFile()) }
+                    .map { parseChannel(objectMapper.readTree(it.toFile())) }
                     .toList()
             }
         } finally {
             workDir.toFile().deleteRecursively()
         }
+    }
+
+    private fun parseChannel(node: JsonNode): Channel {
+        val frames = mutableListOf<Frame>()
+        for (frame in node["frames"]) {
+            frames += Frame(transactionHash = frame["transaction_hash"]?.asText())
+        }
+        return Channel(
+            id = node["id"].asText(),
+            isReady = node["is_ready"].asBoolean(),
+            invalidBatches = node["invalid_batches"].asBoolean(),
+            frames = frames,
+        )
     }
 
     private fun runDecoderWithRetry(maxAttempts: Int, vararg args: String) {
